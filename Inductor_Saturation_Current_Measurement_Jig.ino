@@ -1,5 +1,5 @@
 //defines
-#define FET_GATE PIN_PB5
+#define FET_GATE PIN_PB2
 
 
 #include <Wire.h>
