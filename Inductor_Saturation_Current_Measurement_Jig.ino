@@ -1,3 +1,7 @@
+//defines
+#define FET_GATE PIN_PB5
+
+
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
@@ -9,6 +13,9 @@ LiquidCrystal_I2C lcd(0x39,16,2);
 
 void setup() {
 
+  //pinMode Init
+  pinMode(FET_GATE, OUTPUT);
+  analogWrite(FET_GATE, 127);
   
   //LCD Init 
   lcd.begin(16, 2);
@@ -19,18 +26,9 @@ void setup() {
   lcd.print("hello, world!");
   delay(1000);
 
-  pinMode(PIN_PC1, OUTPUT);
+  
 }
 
 void loop() {
-  // set the cursor to column 0, line 1
-  lcd.setCursor(0,0);
-  lcd.print(analogRead(PIN_PA1));
-  // (note: line 1 is the second row, since counting begins with 0):
-  lcd.setCursor(0, 1);
-  // print the number of seconds since reset:
-  lcd.print(millis() / 100);
   
-  digitalWrite(PIN_PC1, HIGH);
-  digitalWrite(PIN_PC1, LOW);
 }
