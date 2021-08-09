@@ -1,5 +1,6 @@
 //defines
 //pins
+#define DBG PIN_PB4
 #define FET_GATE PIN_PB2
 #define SS PIN_PC3
 #define MOSI PIN_PC2
@@ -8,12 +9,17 @@
 #define MUX_B PIN_PA2
 
 //constants
-#define VREF 5.000f
+#define VREF 5.080f
 
 
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <SPI.h>
+
+
+
+//global variables
+volatile uint16_t latest_reading = 0; // remember to disable interrupts while reading this so it doesn't get changed by the ISR while you're halfway through reading it.
 
 
 
@@ -24,35 +30,45 @@ LiquidCrystal_I2C lcd(0x39,16,2);
 void setup() {
 
   initMUX();
+  pinMode(DBG, OUTPUT);
   
   //pinMode Init
   pinMode(FET_GATE, OUTPUT);
   analogWrite(FET_GATE, 127);
   
   //LCD Init 
-  lcd.begin(16, 2);
-  lcd.init();                      
-  lcd.init();
-  lcd.noBacklight(); //using open collector, therefore polarity is reversed
-  
-  lcd.print("hello, world!");
-  delay(1000);
+  initLCD();
 
   initDAC();
   pinMode(PIN_PA5, OUTPUT); //DEBUG: use this as a temporary voltage reference;
   digitalWrite(PIN_PA5, OUTPUT);
 
+  writeDACmV(999);
+
+  initADC1();
   
 }
 
 void loop() {
   
-  writeDAC(1023);
-  delay(1000);
-  writeDAC(2047);
-  delay(1000);
-  writeDAC(4095);
-  delay(1000);
+  lcd.setCursor(0, 0);
+  char result[7];
+  float adc = readADC1mV();
+  dtostrf(adc, 6, 1, result);
+  lcd.print(result);
+  
+
+  delay(500);
+
+}
+
+
+void initLCD() {
+
+  lcd.begin(16, 2);
+  lcd.init();                      
+  lcd.init();
+  lcd.noBacklight(); //using open collector, therefore polarity is reversed
 
 }
 
@@ -98,6 +114,15 @@ void writeDAC(int value){
 
 }
 
+void writeDACmV(float milivolts) {
+
+  float data = (milivolts/VREF/1000.0f) * 4095;
+  int DACword = (int)data;
+
+  writeDAC(DACword);
+
+}
+
 void initMUX() {
 
   pinMode(MUX_A, OUTPUT);
@@ -117,5 +142,38 @@ void MUXPWM() { //set the mux to pass PWM from micro to gate
 void MUXDummyLoad() { //set the mux to pass opamp output to gate
 
   digitalWrite(MUX_B, HIGH);
+
+}
+
+void initADC1() {
+
+  init_ADC1(); //set up prescalers
+
+  ADC1.MUXPOS = 0x00; //ADC1 in 0 PA4
+  ADC1.CTRLB = ADC_SAMPNUM_ACC64_gc;  //take 64 samples for 3 extra bits, total 13 bits
+  ADC1.CTRLA = ADC_ENABLE_bm | ADC_FREERUN_bm; //start in freerun
+  ADC1.INTCTRL = 1 << ADC_RESRDY_bp  /* Result Ready Interrupt Enable: enabled */
+                | 0 << ADC_WCMP_bp; /* Window Comparator Interrupt Enable: disabled */
+  ADC1.COMMAND = ADC_STCONV_bm; //start first conversion!
+
+}
+
+float readADC1mV() {
+
+  cli();
+  uint16_t rdg = latest_reading; //grab a copy of the reading without being interrupted to prevent corruption
+  sei();
+
+  //TODO: Optimise away this floating point garbage
+  float mVoltage = ((float)rdg) / 8191.0f * VREF * 1000.0f; //13-bits max oversampling and decimation
+
+  return mVoltage;
+
+}
+
+ISR(ADC1_RESRDY_vect) {
+
+  uint16_t raw_reading = ADC1.RES;
+  latest_reading = raw_reading >> 3; // 13-bits
 
 }
