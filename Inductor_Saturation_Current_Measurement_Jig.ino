@@ -54,11 +54,13 @@ void loop() {
   lcd.setCursor(0, 0);
   char result[7];
   float adc = readADC1mV();
-  dtostrf(adc, 6, 1, result);
+  float mAmps = adc * 2.0f;
+  dtostrf(mAmps, 6, 1, result);
   lcd.print(result);
+  lcd.print(" mA");
   
 
-  delay(500);
+  delay(100);
 
 }
 
