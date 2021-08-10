@@ -5,11 +5,13 @@
 #define SS PIN_PC3
 #define MOSI PIN_PC2
 #define SCK PIN_PC0
-#define MUX_A PIN_PA3
-#define MUX_B PIN_PA2
+#define MUX_A PIN_PA7
+#define MUX_B PIN_PA6
+#define CHARGE_PUMP PIN_PA3
 
 //constants
 #define VREF 5.080f
+#define CHARGE_PUMP_FREQ 100000
 
 
 #include <Wire.h>
@@ -30,6 +32,7 @@ LiquidCrystal_I2C lcd(0x39,16,2);
 void setup() {
 
   initMUX();
+  initChargePump();
   pinMode(DBG, OUTPUT);
   
   //pinMode Init
@@ -179,3 +182,15 @@ ISR(ADC1_RESRDY_vect) {
   latest_reading = raw_reading >> 3; // 13-bits
 
 }
+
+void initChargePump() {
+
+  pinMode(CHARGE_PUMP, OUTPUT);
+
+  TCB1.CCMP = 0x7FFF; //50% duty cycle
+  TCB1.CTRLB = TCB_CCMPEN_bm | 0b111 ; //enable waveform output, 8-bit PWM mode
+  TCB1.CTRLA = TCB_ENABLE_bm; //start the timer
+
+
+}
+
