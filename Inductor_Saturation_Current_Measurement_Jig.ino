@@ -8,6 +8,7 @@
 #define MUX_A PIN_PA7
 #define MUX_B PIN_PA6
 #define CHARGE_PUMP PIN_PA3
+#define PWM PIN_PB5
 
 //constants
 #define VREF 5.080f
@@ -33,23 +34,22 @@ void setup() {
 
   initMUX();
   initChargePump();
-  pinMode(DBG, OUTPUT);
+  initPWM();
   
-  //pinMode Init
-  pinMode(FET_GATE, OUTPUT);
-  analogWrite(FET_GATE, 127);
+  pinMode(DBG, OUTPUT);
   
   //LCD Init 
   initLCD();
 
   initDAC();
+  
   pinMode(PIN_PA5, OUTPUT); //DEBUG: use this as a temporary voltage reference;
-  digitalWrite(PIN_PA5, OUTPUT);
-
-  writeDACmV(999);
+  digitalWriteFast(PIN_PA5, HIGH); //ordinary digitalWrite has some weird turn off timer stuff that breaks everything
+  
+  writeDACmV(999);  
 
   initADC1();
-  
+
 }
 
 void loop() {
@@ -191,6 +191,46 @@ void initChargePump() {
   TCB1.CTRLB = TCB_CCMPEN_bm | 0b111 ; //enable waveform output, 8-bit PWM mode
   TCB1.CTRLA = TCB_ENABLE_bm; //start the timer
 
+}
+
+void initPWM() { //Waveform generation for inductor saturation current measurement
+
+  pinMode(PWM, OUTPUT);
+
+  PORTMUX.CTRLC = PORTMUX_TCA02_bm; //set Waveform output 2 to alternate location
+
+  TCA0.SPLIT.CTRLA = 0; //disable TCA0 and set divider to 1
+  TCA0.SPLIT.CTRLESET = TCA_SPLIT_CMD_RESET_gc|0x03; //set CMD to RESET, and enable on both pins.
+  TCA0.SPLIT.CTRLD = 0; //Split mode now off, CMPn = 0, CNT = 0, PER = 255
+
+  TCA0.SINGLE.CTRLB = (TCA_SINGLE_CMP2EN_bm|TCA_SINGLE_WGMODE_SINGLESLOPE_gc); //Single slope PWM mode, PWM on WO0
+  TCA0.SINGLE.PER = 0xFFFF; // Count all the way up to 0xFFFF
+  // At 20MHz, this gives ~305Hz PWM
+  TCA0.SINGLE.CMP2 = 0;
+  TCA0.SINGLE.CTRLA = TCA_SINGLE_ENABLE_bm; //enable the timer with no prescaler
+}
+
+void setPWMPeriod(unsigned long high, unsigned long low) { //set the period in nanoseconds, 20MHz gives a resolution of 50ns
+
+  unsigned long totalPeriod = high + low;
+  unsigned long targetPeriod = totalPeriod / 50; //at 20MHz, one tick of the timer is 50ns
+
+  byte presc = 0;
+
+  while(targetPeriod > 65535 && presc < 7) {
+
+    presc++;
+    targetPeriod = targetPeriod >> (presc > 4 ? 2 : 1);
+
+  }
+
+  TCA0.SINGLE.CTRLA = (presc << 1) | TCA_SINGLE_ENABLE_bm;
+
+  TCA0.SINGLE.PER = targetPeriod; 
+  TCA0.SINGLE.CMP2 = map(high, 0, totalPeriod, 0, targetPeriod); //set the amount of time spent high
+
+  //TCA0.SINGLE.PER = 100; 
+  //TCA0.SINGLE.CMP2 = 50; //set the amount of time spent high
 
 }
 
