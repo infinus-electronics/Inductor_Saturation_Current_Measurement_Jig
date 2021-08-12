@@ -35,8 +35,7 @@ void setup() {
   initMUX();
   initChargePump();
   initPWM();
-  setPWMFreq(1000);
-  setPWMDuty(127);
+  setPWMPeriod(100000, 10000);
   pinMode(DBG, OUTPUT);
   
   //LCD Init 
@@ -235,6 +234,19 @@ void setPWMFreq(unsigned long freq) {
 void setPWMDuty(int duty){
 
   TCA0.SINGLE.CMP2 = map(duty, 0, 255, 0, period);
+
+}
+
+void setPWMPeriod(long period_uS, long highPeriod_uS){
+
+  period_uS = constrain(period_uS, 0, 1000000);
+  highPeriod_uS = constrain(highPeriod_uS, 0, period_uS);
+
+  long targetFreq = 1000000 / period_uS;
+  int targetDuty = (255L * highPeriod_uS / period_uS);
+
+  setPWMFreq(targetFreq);
+  setPWMDuty(targetDuty);
 
 }
 
