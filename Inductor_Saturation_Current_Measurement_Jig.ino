@@ -23,7 +23,7 @@
 
 //global variables
 volatile uint16_t latest_reading = 0; // remember to disable interrupts while reading this so it doesn't get changed by the ISR while you're halfway through reading it.
-
+unsigned int period = 0xFFFF;
 
 
 /*INIT*/
@@ -35,7 +35,8 @@ void setup() {
   initMUX();
   initChargePump();
   initPWM();
-  
+  setPWMFreq(1000);
+  setPWMDuty(127);
   pinMode(DBG, OUTPUT);
   
   //LCD Init 
@@ -210,27 +211,30 @@ void initPWM() { //Waveform generation for inductor saturation current measureme
   TCA0.SINGLE.CTRLA = TCA_SINGLE_ENABLE_bm; //enable the timer with no prescaler
 }
 
-void setPWMPeriod(unsigned long high, unsigned long low) { //set the period in nanoseconds, 20MHz gives a resolution of 50ns
 
-  unsigned long totalPeriod = high + low;
-  unsigned long targetPeriod = totalPeriod / 50; //at 20MHz, one tick of the timer is 50ns
+void setPWMFreq(unsigned long freq) {
+
+  unsigned long tempPeriod = F_CPU / freq;
 
   byte presc = 0;
 
-  while(targetPeriod > 65535 && presc < 7) {
+  while(tempPeriod > 65535 && presc < 7) {
 
     presc++;
-    targetPeriod = targetPeriod >> (presc > 4 ? 2 : 1);
+    tempPeriod = tempPeriod >> (presc > 4 ? 2 : 1);
 
   }
+  period = tempPeriod;
 
   TCA0.SINGLE.CTRLA = (presc << 1) | TCA_SINGLE_ENABLE_bm;
+  TCA0.SINGLE.PER = period; 
+  
 
-  TCA0.SINGLE.PER = targetPeriod; 
-  TCA0.SINGLE.CMP2 = map(high, 0, totalPeriod, 0, targetPeriod); //set the amount of time spent high
+}
 
-  //TCA0.SINGLE.PER = 100; 
-  //TCA0.SINGLE.CMP2 = 50; //set the amount of time spent high
+void setPWMDuty(int duty){
+
+  TCA0.SINGLE.CMP2 = map(duty, 0, 255, 0, period);
 
 }
 
