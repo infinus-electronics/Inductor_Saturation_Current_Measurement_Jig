@@ -13,6 +13,7 @@
 //constants
 #define VREF 5.080f
 #define CHARGE_PUMP_FREQ 100000
+#define MAX_PWM_FREQ 78000 //to maintain 8-bit duty cycle control
 
 
 #include <Wire.h>
@@ -212,6 +213,8 @@ void initPWM() { //Waveform generation for inductor saturation current measureme
 
 
 void setPWMFreq(unsigned long freq) {
+
+  freq = constrain(freq, 1, MAX_PWM_FREQ);
 
   unsigned long tempPeriod = F_CPU / freq;
 
