@@ -29,12 +29,18 @@ const char modeDescription[3][17] = {"PWM", "CC Dummy Load", "Current Readout"};
 //global variables
 volatile uint16_t latest_reading = 0; // remember to disable interrupts while reading this so it doesn't get changed by the ISR while you're halfway through reading it.
 unsigned int period = 0xFFFF;
+
 long lastButtonPress[5] = {0, 0, 0, 0, 0}; //down, left, mid, right, up
 bool buttonWasPressed[5] = {false, false, false, false, false}; //are the buttons currently pressed
 long lastLongPress[5] = {0, 0, 0, 0, 0}; //the last time a long-press action was triggered
 
 typedef enum {ISat, DL, AMM, final} Mode; //saturation current, dummy load, and ammeter modes, final is there to help in mode cycling, it is not actually used
 Mode mode = DL; //default to dummy load mode
+
+//user changeable parameters
+int setLoad = 0; //DAC output word for dummy load, note that the dac resolution is 1mA per LSB
+long setFreq = 1000; //target frequency out
+int setDuty = 127; //target duty cycle (8 bit)
 
 
 /*INIT*/
@@ -46,7 +52,11 @@ void setup() {
   initMUX();  
   initChargePump();
   initPWM();
+
   initLCD();
+  lcd.setCursor(0, 0);
+  lcd.printf("%-16s", modeDescription[mode]);
+
   initDAC();
   initADC1();
 
@@ -59,6 +69,12 @@ void setup() {
 }
 
 void loop() {
+
+  //take a current reading first
+  char result[7];
+  float adc = readADC1mV();
+  float mAmps = adc * 2.0f;
+  dtostrf(mAmps, 6, 1, result);
 
   //begin button handler here
   int currentButtonState = analogRead(DPAD);
@@ -83,21 +99,30 @@ void loop() {
     for(int i = 0; i < 4; i++) {
       buttonWasPressed[i] = false;
     }
-    Serial.println("release all");
+    
   }
 
   switch(mode) { //mode state machine
 
     case ISat:
 
+      lcd.setCursor(0, 1);
+      lcd.printf("f=%5dHz  d=%3d", setFreq, setDuty);
+
       break;
 
     case DL:
 
+      lcd.setCursor(0, 1);
+      lcd.printf("%smA  %4dmA", result, setLoad);      
+
       break;
 
     case AMM:
-
+    
+      lcd.setCursor(0, 1); //print current ammeter reading on second line
+      lcd.printf("%s        mA", result);
+      
       break;
 
     default:
@@ -346,6 +371,9 @@ void leftButton() {
         
         //go to ammeter mode
         mode = AMM;
+
+        setPWMDuty(0); //turn off PWM to reduce noise
+
         lcd.setCursor(0, 0);
         lcd.printf("%-16s", modeDescription[mode]);
 
@@ -417,6 +445,9 @@ void rightButton() {
         
         //go to dummy load mode
         mode = DL;
+        
+        setPWMDuty(0); //turn off PWM to reduce noise
+
         lcd.setCursor(0, 0);
         lcd.printf("%-16s", modeDescription[mode]);
 
