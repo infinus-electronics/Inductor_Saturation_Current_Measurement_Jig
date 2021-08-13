@@ -9,11 +9,15 @@
 #define MUX_B PIN_PA6
 #define CHARGE_PUMP PIN_PA3
 #define PWM PIN_PB5
+#define DPAD PIN_PA1
 
 //constants
 #define VREF 5.080f
 #define CHARGE_PUMP_FREQ 100000
 #define MAX_PWM_FREQ 78000 //to maintain 8-bit duty cycle control
+#define LONGPRESS 2500 //2500ms counts as a long press
+#define LONGRETRIGGER 2000 //if the button is held down an additional 2000ms, retrigger the longpress action
+const char modeDescription[3][17] = {"PWM", "CC Dummy Load", "Current Readout"};
 
 
 #include <Wire.h>
@@ -25,6 +29,12 @@
 //global variables
 volatile uint16_t latest_reading = 0; // remember to disable interrupts while reading this so it doesn't get changed by the ISR while you're halfway through reading it.
 unsigned int period = 0xFFFF;
+long lastButtonPress[5] = {0, 0, 0, 0, 0}; //down, left, mid, right, up
+bool buttonWasPressed[5] = {false, false, false, false, false}; //are the buttons currently pressed
+long lastLongPress[5] = {0, 0, 0, 0, 0}; //the last time a long-press action was triggered
+
+typedef enum {ISat, DL, AMM, final} Mode; //saturation current, dummy load, and ammeter modes, final is there to help in mode cycling, it is not actually used
+Mode mode = DL; //default to dummy load mode
 
 
 /*INIT*/
@@ -33,38 +43,79 @@ LiquidCrystal_I2C lcd(0x39,16,2);
 
 void setup() {
 
-  initMUX();
+  initMUX();  
   initChargePump();
   initPWM();
-  setPWMPeriod(100000, 10000);
-  pinMode(DBG, OUTPUT);
-  
-  //LCD Init 
   initLCD();
-
   initDAC();
-  
+  initADC1();
+
+  Serial.begin(9600);
+  pinMode(DBG, OUTPUT);
   pinMode(PIN_PA5, OUTPUT); //DEBUG: use this as a temporary voltage reference;
   digitalWriteFast(PIN_PA5, HIGH); //ordinary digitalWrite has some weird turn off timer stuff that breaks everything
-  
-  writeDACmV(999);  
-
-  initADC1();
+  writeDACmV(999);
 
 }
 
 void loop() {
+
+  //begin button handler here
+  int currentButtonState = analogRead(DPAD);
+
+  if(currentButtonState > 46 && currentButtonState <= 135) { //down button
+    downButton();
+  }
+  else if(currentButtonState > 135 && currentButtonState <= 247) { //left button
+    leftButton();
+  }
+  else if (currentButtonState > 247 && currentButtonState <= 497) { //middle button
+    midButton();
+  }
+  else if (currentButtonState > 497 && currentButtonState <= 758) { //right button
+    rightButton();
+  }
+  else if (currentButtonState > 758) { //top button
+    upButton();
+  }
+  else {
+    //all buttons released, go ahead and clear everything
+    for(int i = 0; i < 4; i++) {
+      buttonWasPressed[i] = false;
+    }
+    Serial.println("release all");
+  }
+
+  switch(mode) { //mode state machine
+
+    case ISat:
+
+      break;
+
+    case DL:
+
+      break;
+
+    case AMM:
+
+      break;
+
+    default:
+
+      break;
+
+  }
   
-  lcd.setCursor(0, 0);
-  char result[7];
-  float adc = readADC1mV();
-  float mAmps = adc * 2.0f;
-  dtostrf(mAmps, 6, 1, result);
-  lcd.print(result);
-  lcd.print(" mA");
+  // lcd.setCursor(0, 0);
+  // char result[7];
+  // float adc = readADC1mV();
+  // float mAmps = adc * 2.0f;
+  // dtostrf(mAmps, 6, 1, result);
+  // lcd.print(result);
+  // lcd.print(" mA");
   
 
-  delay(100);
+  // delay(100);
 
 }
 
@@ -253,3 +304,165 @@ void setPWMPeriod(long period_uS, long highPeriod_uS){
 
 }
 
+
+//button handlers
+void downButton() {
+
+  if (buttonWasPressed[0] == false) { //button was just pressed
+
+    buttonWasPressed[0] = true;
+    lastButtonPress[0] = millis(); //track the downstroke
+    //do short-press action here
+    
+
+  }
+  else if ( ((millis() - lastButtonPress[0]) >= LONGPRESS) && ((millis() - lastLongPress[0]) >= LONGRETRIGGER) ) { //button was already pressed, and was held for LONGPRESS amount of miliseconds, and the longpress timeout has expired
+
+    lastLongPress[0] = millis();
+    //do long-press action here
+    
+  }
+
+
+}
+
+void leftButton() {
+  
+  if (buttonWasPressed[1] == false) { //button was just pressed
+
+    buttonWasPressed[1] = true;
+    lastButtonPress[1] = millis(); //track the downstroke
+    //do short-press action here
+
+  }
+  else if ( ((millis() - lastButtonPress[1]) >= LONGPRESS) && ((millis() - lastLongPress[1]) >= LONGRETRIGGER) ) { //button was already pressed, and was held for LONGPRESS amount of miliseconds, and the longpress timeout has expired
+
+    lastLongPress[1] = millis();
+    //do long-press action here
+
+    switch(mode) { //mode was changed, do all the requisite updating
+
+      case ISat:
+        
+        //go to ammeter mode
+        mode = AMM;
+        lcd.setCursor(0, 0);
+        lcd.printf("%-16s", modeDescription[mode]);
+
+        break;
+
+      case DL:
+
+        //go to inductor sat current mode
+        mode = ISat;
+        lcd.setCursor(0, 0);
+        lcd.printf("%-16s", modeDescription[mode]);
+
+        break;
+      
+      case AMM:
+
+        //go to dummy load mode
+        mode = DL;
+        lcd.setCursor(0, 0);
+        lcd.printf("%-16s", modeDescription[mode]);
+
+        break;
+      
+      default:
+
+        break;
+
+    }
+    
+  }
+
+}
+
+void midButton() {
+
+  if (buttonWasPressed[2] == false) { //button was just pressed
+
+    buttonWasPressed[2] = true;
+    lastButtonPress[2] = millis(); //track the downstroke
+    //do short-press action here
+
+  }
+  else if ( ((millis() - lastButtonPress[2]) >= LONGPRESS) && ((millis() - lastLongPress[2]) >= LONGRETRIGGER) ) { //button was already pressed, and was held for LONGPRESS amount of miliseconds, and the longpress timeout has expired
+
+    lastLongPress[2] = millis();
+    //do long-press action here
+    
+  }
+
+}
+
+void rightButton() {
+
+  if (buttonWasPressed[3] == false) { //button was just pressed
+
+    buttonWasPressed[3] = true;
+    lastButtonPress[3] = millis(); //track the downstroke
+    //do short-press action here
+
+  }
+  else if ( ((millis() - lastButtonPress[3]) >= LONGPRESS) && ((millis() - lastLongPress[3]) >= LONGRETRIGGER) ) { //button was already pressed, and was held for LONGPRESS amount of miliseconds, and the longpress timeout has expired
+
+    lastLongPress[3] = millis();
+    //do long-press action here
+    
+    switch(mode) { //mode was changed, do all the requisite updating
+
+      case ISat:
+        
+        //go to dummy load mode
+        mode = DL;
+        lcd.setCursor(0, 0);
+        lcd.printf("%-16s", modeDescription[mode]);
+
+        break;
+
+      case DL:
+
+        //go to ammeter mode
+        mode = AMM;
+        lcd.setCursor(0, 0);
+        lcd.printf("%-16s", modeDescription[mode]);
+
+        break;
+      
+      case AMM:
+
+        //go to inductor sat current mode
+        mode = ISat;
+        lcd.setCursor(0, 0);
+        lcd.printf("%-16s", modeDescription[mode]);
+
+        break;
+      
+      default:
+
+        break;
+
+    }
+    
+  }
+
+}
+
+void upButton() {
+
+  if (buttonWasPressed[4] == false) { //button was just pressed
+
+    buttonWasPressed[4] = true;
+    lastButtonPress[4] = millis(); //track the downstroke
+    //do short-press action here
+
+  }
+  else if ( ((millis() - lastButtonPress[4]) >= LONGPRESS) && ((millis() - lastLongPress[4]) >= LONGRETRIGGER) ) { //button was already pressed, and was held for LONGPRESS amount of miliseconds, and the longpress timeout has expired
+
+    lastLongPress[4] = millis();
+    //do long-press action here
+    
+  }
+}
