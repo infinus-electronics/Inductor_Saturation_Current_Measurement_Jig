@@ -26,6 +26,7 @@
 #define LONGPRESS 2500 //2500ms counts as a long press
 #define LONGRETRIGGER 2000 //if the button is held down an additional 2000ms, retrigger the longpress action
 #define BLINKPERIOD 500 //digit blink frequency in parameter set mode
+#define REFRESHPERIOD 200 //how often to refresh the readout so I can actually see what is the current
 const char modeDescription[3][17] = {"PWM", "CC Dummy Load", "Current Readout"};
 const int powersOfTen[5] = {1, 10, 100, 1000, 10000};
 const int maxCursorPos[3] = {7, 3}; //how many available positions are there to be set in each mode, 7 in ISat because 0-4 are freq whereas 5,6,7 are duty
@@ -39,7 +40,9 @@ const int maxCursorPos[3] = {7, 3}; //how many available positions are there to 
 
 //global variables
 char lcdSecondRow[17]; //string buffer for the second row of the LCD
+long lastRefreshed = 0; //when was the last time the reading was refreshed
 
+int adc = 0; //helper for the periodic refresh code
 volatile uint16_t latest_reading = 0; // remember to disable interrupts while reading this so it doesn't get changed by the ISR while you're halfway through reading it.
 unsigned int period = 0xFFFF;
 
@@ -55,7 +58,7 @@ bool paramSet = false; //are we currently setting parameters?
 int currentCursorPos = 0; //which thing are we setting?
 int setLoad = 0; //DAC output word for dummy load, note that the dac resolution is 1mA per LSB
 long setFreq = 1000; //target frequency out
-int setDuty = 127; //target duty cycle (8 bit)
+int setDuty = 0; //target duty cycle (8 bit), default 0 so we don't blow stuff up
 
 
 /*INIT*/
@@ -84,16 +87,20 @@ void setup() {
 }
 
 void loop() {
-  
+
 #if defined DEBUG
   Serial.println(latest_reading);
 #endif
-  //take a current reading first
-  char result[7];
-  float adc = readADC1mV();
-  float mAmps = adc * 2.0f;
-  dtostrf(mAmps, 6, 1, result);
 
+  if(millis() - lastRefreshed > REFRESHPERIOD){ 
+ 
+    cli();
+    adc = latest_reading;
+    sei();
+
+  }
+  
+  
   //begin button handler here
   int currentButtonState = analogRead(DPAD);
 
@@ -132,14 +139,14 @@ void loop() {
     case DL:
 
       lcd.setCursor(0, 1);
-      snprintf(lcdSecondRow, 17, "%smA \x7E%04dmA", result, setLoad); //hex 7e is the right arrow in the HD44780's charset
+      snprintf(lcdSecondRow, 17, "%4dmA   \x7E%04dmA", adc, setLoad); //hex 7e is the right arrow in the HD44780's charset
 
       break;
 
     case AMM:
     
       lcd.setCursor(0, 1); //print current ammeter reading on second line
-      snprintf(lcdSecondRow, 17, "       %s mA", result);
+      snprintf(lcdSecondRow, 17, "         %4d mA", adc);
       
       break;
 
@@ -279,6 +286,7 @@ void MUXDummyLoad() { //set the mux to pass opamp output to gate
 void initADC1() {
 
   init_ADC1(); //set up prescalers
+  ADC1.CTRLA &= ~ADC_ENABLE_bm; //disable ADC while it is being configured
 
   VREF.CTRLB &= ~(1 << VREF_ADC1REFEN_bp);
   VREF.CTRLC = VREF_ADC1REFSEL_2V5_gc; //configure internal reference to the closest highest voltage
@@ -287,7 +295,9 @@ void initADC1() {
   ADC1.CTRLC &= ~ ADC_REFSEL0_bm; //external reference
   ADC1.CTRLC |= ADC_REFSEL1_bm; //external reference
   ADC1.CTRLC |= ADC_SAMPCAP_bm; //set the smaller sampling cap as per datasheet recommendations
-  ADC1.CTRLB = ADC_SAMPNUM_ACC64_gc;  //take 64 samples for 3 extra bits, total 13 bits
+  ADC1.CTRLC = (ADC1.CTRLC & (~ADC_PRESC_gm)) | ADC_PRESC_DIV256_gc; //slow down the ADC to see if it alleviates noise
+  ADC1.CTRLB = ADC_SAMPNUM_ACC64_gc;  //take 64 samples for 3 extra bits, total 13 bits, but reduce 1 bit since its kinda pointless to have 0.5mA with all that noise anyway
+  ADC1.SAMPCTRL = 31; //more smoothing please
   ADC1.CTRLA = ADC_ENABLE_bm | ADC_FREERUN_bm; //start in freerun
   ADC1.INTCTRL = 1 << ADC_RESRDY_bp  /* Result Ready Interrupt Enable: enabled */
                 | 0 << ADC_WCMP_bp; /* Window Comparator Interrupt Enable: disabled */
@@ -302,7 +312,7 @@ float readADC1mV() {
   sei();
 
   //TODO: Optimise away this floating point garbage
-  float mVoltage = ((float)rdg) / 8191.0f * V_REF * 1000.0f; //13-bits max oversampling and decimation
+  float mVoltage = ((float)rdg) / 4095.0f * V_REF * 1000.0f; //13-bits max oversampling and decimation
 
   return mVoltage;
 
@@ -311,7 +321,7 @@ float readADC1mV() {
 ISR(ADC1_RESRDY_vect) {
 
   uint16_t raw_reading = ADC1.RES;
-  latest_reading = raw_reading >> 3; // 13-bits
+  latest_reading = raw_reading >> 4; // 12-bits
 
 }
 
