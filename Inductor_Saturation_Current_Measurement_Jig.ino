@@ -19,11 +19,14 @@
 #define MIN_PWM_FREQ 1L
 #define MAX_DUTY 255
 #define MIN_DUTY 0
+#define MAX_LOAD 4096
+#define MIN_LOAD 0
 #define LONGPRESS 2500 //2500ms counts as a long press
 #define LONGRETRIGGER 2000 //if the button is held down an additional 2000ms, retrigger the longpress action
 #define BLINKPERIOD 500 //digit blink frequency in parameter set mode
 const char modeDescription[3][17] = {"PWM", "CC Dummy Load st", "Current Readout"};
 const int powersOfTen[5] = {1, 10, 100, 1000, 10000};
+const int maxCursorPos[3] = {7, 3}; //how many available positions are there to be set in each mode, 7 in ISat because 0-4 are freq whereas 5,6,7 are duty
 
 
 #include <Wire.h>
@@ -48,7 +51,6 @@ Mode mode = DL; //default to dummy load mode
 //user changeable parameters
 bool paramSet = false; //are we currently setting parameters?
 int currentCursorPos = 0; //which thing are we setting?
-const int maxCursorPos[3] = {7, 3}; //how many available positions are there to be set in each mode, 7 in ISat because 0-4 are freq whereas 5,6,7 are duty
 int setLoad = 0; //DAC output word for dummy load, note that the dac resolution is 1mA per LSB
 long setFreq = 1000; //target frequency out
 int setDuty = 127; //target duty cycle (8 bit)
@@ -404,6 +406,9 @@ void downButton() {
         
         case DL:
 
+          setLoad -= powersOfTen[currentCursorPos];
+          setLoad = constrain(setLoad, MIN_LOAD, MAX_LOAD);
+
           break;
         
         case AMM:
@@ -472,6 +477,10 @@ void leftButton() {
 
         //go to inductor sat current mode
         mode = ISat;
+
+        setPWMFreq(setFreq); //turn on PWM
+        setPWMDuty(setDuty);
+
         lcd.setCursor(0, 0);
         lcd.printf("%-16s", modeDescription[mode]);
 
@@ -521,7 +530,34 @@ void midButton() {
 
     else {
 
-      paramSet = false;
+      paramSet = false; //commit all the changes
+
+      switch(mode) { 
+
+      case ISat:
+        
+        setPWMFreq(setFreq);
+        setPWMDuty(setDuty);
+        
+        break;
+
+      case DL:
+
+        writeDACmV(setLoad);
+
+        break;
+      
+      case AMM:
+
+        
+
+        break;
+      
+      default:
+
+        break;
+
+    }
       
 
     }
@@ -582,6 +618,10 @@ void rightButton() {
 
         //go to inductor sat current mode
         mode = ISat;
+
+        setPWMFreq(setFreq); //turn on PWM
+        setPWMDuty(setDuty);
+
         lcd.setCursor(0, 0);
         lcd.printf("%-16s", modeDescription[mode]);
 
@@ -628,6 +668,9 @@ void upButton() {
             break;
           
           case DL:
+
+            setLoad += powersOfTen[currentCursorPos];
+            setLoad = constrain(setLoad, MIN_LOAD, MAX_LOAD);
 
             break;
           
