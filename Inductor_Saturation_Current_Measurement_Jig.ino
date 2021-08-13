@@ -12,13 +12,18 @@
 #define DPAD PIN_PA1
 
 //constants
+#define WHITESPACE 0xA0 //whitespace in the HD44780
 #define VREF 5.080f
 #define CHARGE_PUMP_FREQ 100000
-#define MAX_PWM_FREQ 78000 //to maintain 8-bit duty cycle control
+#define MAX_PWM_FREQ 78000L //to maintain 8-bit duty cycle control
+#define MIN_PWM_FREQ 1L
+#define MAX_DUTY 255
+#define MIN_DUTY 0
 #define LONGPRESS 2500 //2500ms counts as a long press
 #define LONGRETRIGGER 2000 //if the button is held down an additional 2000ms, retrigger the longpress action
 #define BLINKPERIOD 500 //digit blink frequency in parameter set mode
-const char modeDescription[3][17] = {"PWM", "CC Dummy Load", "Current Readout"};
+const char modeDescription[3][17] = {"PWM", "CC Dummy Load st", "Current Readout"};
+const int powersOfTen[5] = {1, 10, 100, 1000, 10000};
 
 
 #include <Wire.h>
@@ -28,6 +33,8 @@ const char modeDescription[3][17] = {"PWM", "CC Dummy Load", "Current Readout"};
 
 
 //global variables
+char lcdSecondRow[17]; //string buffer for the second row of the LCD
+
 volatile uint16_t latest_reading = 0; // remember to disable interrupts while reading this so it doesn't get changed by the ISR while you're halfway through reading it.
 unsigned int period = 0xFFFF;
 
@@ -100,7 +107,7 @@ void loop() {
   }
   else {
     //all buttons released, go ahead and clear everything
-    for(int i = 0; i < 4; i++) {
+    for(int i = 0; i < 5; i++) {
       buttonWasPressed[i] = false;
     }
     
@@ -111,21 +118,21 @@ void loop() {
     case ISat:
 
       lcd.setCursor(0, 1);
-      lcd.printf("f=%05dHz  d=%03d", setFreq, setDuty);
+      snprintf(lcdSecondRow, 17, "f=%05ldHz  d=%03d", setFreq, setDuty);
 
       break;
 
     case DL:
 
       lcd.setCursor(0, 1);
-      lcd.printf("%smA  %04dmA", result, setLoad);      
+      snprintf(lcdSecondRow, 17, "%smA  %04dmA", result, setLoad);      
 
       break;
 
     case AMM:
     
       lcd.setCursor(0, 1); //print current ammeter reading on second line
-      lcd.printf("        %smA", result);
+      snprintf(lcdSecondRow, 17, "        %smA", result);
       
       break;
 
@@ -141,15 +148,13 @@ void loop() {
 
     case ISat:
 
-      lcd.setCursor((currentCursorPos <= 4 ? (6 - currentCursorPos) : (15 - currentCursorPos)), 1);
-      lcd.print(" ");
+      lcdSecondRow[(currentCursorPos <= 4 ? (6 - currentCursorPos) : (20 - currentCursorPos))] = WHITESPACE;
 
       break;
 
     case DL:
 
-      lcd.setCursor(13 - currentCursorPos, 1);
-      lcd.print(" "); 
+      lcdSecondRow[(13 - currentCursorPos)] = WHITESPACE;
 
       break;
 
@@ -167,10 +172,20 @@ void loop() {
 
   }
   
-  
+  //flush second row to LCD
+  lcd.setCursor(0, 1);
+  lcd.print(lcdSecondRow);
 
 }
 
+long constrainL(long in, long min, long max){
+
+  if(in > max) in = max;
+  if(in < min) in = min;
+
+  return in;
+
+}
 
 void initLCD() {
 
@@ -366,6 +381,42 @@ void downButton() {
     lastButtonPress[0] = millis(); //track the downstroke
     //do short-press action here
     
+    if(paramSet == true) { //change some parameters
+
+      switch(mode) {
+
+        case ISat:
+
+            if(currentCursorPos <= 4) { //set frequency
+
+              setFreq -= (long)powersOfTen[currentCursorPos];
+              setFreq = constrainL(setFreq, MIN_PWM_FREQ, MAX_PWM_FREQ);
+
+            }
+            else { //set duty cycle
+
+              setDuty -= powersOfTen[currentCursorPos - 5];
+              setDuty = constrain(setDuty, MIN_DUTY, MAX_DUTY);
+
+            }
+
+          break;
+        
+        case DL:
+
+          break;
+        
+        case AMM:
+
+          break;
+        
+        default:
+
+          break;
+
+      }
+
+    }
 
   }
   else if ( ((millis() - lastButtonPress[0]) >= LONGPRESS) && ((millis() - lastLongPress[0]) >= LONGRETRIGGER) ) { //button was already pressed, and was held for LONGPRESS amount of miliseconds, and the longpress timeout has expired
@@ -385,6 +436,17 @@ void leftButton() {
     buttonWasPressed[1] = true;
     lastButtonPress[1] = millis(); //track the downstroke
     //do short-press action here
+
+    if (paramSet == true) { //jog through the various places
+
+      if(currentCursorPos == maxCursorPos[mode]) {
+        currentCursorPos = 0; //loop around
+      }
+      else {
+        currentCursorPos++;
+      }
+
+    }
 
   }
   else if ( ((millis() - lastButtonPress[1]) >= LONGPRESS) && ((millis() - lastLongPress[1]) >= LONGRETRIGGER) ) { //button was already pressed, and was held for LONGPRESS amount of miliseconds, and the longpress timeout has expired
@@ -447,7 +509,7 @@ void midButton() {
 
     lastLongPress[2] = millis();
     //do long-press action here
-    lcd.setCursor(0, 0);
+    
 
     //long pressing middle button enters and exits parameter set mode
     if(paramSet == false) { //we are just about to set some parameters
@@ -455,25 +517,6 @@ void midButton() {
       paramSet = true;
       currentCursorPos = 0; //initialise cursor position
       
-      switch(mode) {
-
-        case ISat:
-
-          break;
-
-        case DL:
-
-          break;
-
-        case AMM:
-
-          break;
-
-        default:
-          break;
-
-      }
-
     }
 
     else {
@@ -494,6 +537,17 @@ void rightButton() {
     buttonWasPressed[3] = true;
     lastButtonPress[3] = millis(); //track the downstroke
     //do short-press action here
+
+    if (paramSet == true) { //jog through the various places
+
+      if(currentCursorPos == 0) {
+        currentCursorPos = maxCursorPos[mode]; //loop around
+      }
+      else {
+        currentCursorPos--;
+      }
+
+    }
 
   }
   else if ( ((millis() - lastButtonPress[3]) >= LONGPRESS) && ((millis() - lastLongPress[3]) >= LONGRETRIGGER) ) { //button was already pressed, and was held for LONGPRESS amount of miliseconds, and the longpress timeout has expired
@@ -550,6 +604,44 @@ void upButton() {
     buttonWasPressed[4] = true;
     lastButtonPress[4] = millis(); //track the downstroke
     //do short-press action here
+
+
+    if(paramSet == true) { //change some parameters
+
+        switch(mode) {
+
+          case ISat:
+
+              if(currentCursorPos <= 4) { //set frequency
+
+                setFreq += (long)powersOfTen[currentCursorPos];
+                setFreq = constrainL(setFreq, MIN_PWM_FREQ, MAX_PWM_FREQ);
+
+              }
+              else { //set duty cycle
+
+                setDuty += powersOfTen[currentCursorPos - 5];
+                setDuty = constrain(setDuty, MIN_DUTY, MAX_DUTY);
+
+              }
+
+            break;
+          
+          case DL:
+
+            break;
+          
+          case AMM:
+
+            break;
+          
+          default:
+
+            break;
+
+        }
+
+      }
 
   }
   else if ( ((millis() - lastButtonPress[4]) >= LONGPRESS) && ((millis() - lastLongPress[4]) >= LONGRETRIGGER) ) { //button was already pressed, and was held for LONGPRESS amount of miliseconds, and the longpress timeout has expired
