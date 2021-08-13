@@ -1,3 +1,5 @@
+#undef DEBUG
+
 //defines
 //pins
 #define DBG PIN_PB4
@@ -13,18 +15,18 @@
 
 //constants
 #define WHITESPACE 0xA0 //whitespace in the HD44780
-#define VREF 5.080f
+#define V_REF 2.048f
 #define CHARGE_PUMP_FREQ 100000
 #define MAX_PWM_FREQ 78000L //to maintain 8-bit duty cycle control
 #define MIN_PWM_FREQ 1L
 #define MAX_DUTY 255
 #define MIN_DUTY 0
-#define MAX_LOAD 4096
+#define MAX_LOAD 4095
 #define MIN_LOAD 0
 #define LONGPRESS 2500 //2500ms counts as a long press
 #define LONGRETRIGGER 2000 //if the button is held down an additional 2000ms, retrigger the longpress action
 #define BLINKPERIOD 500 //digit blink frequency in parameter set mode
-const char modeDescription[3][17] = {"PWM", "CC Dummy Load st", "Current Readout"};
+const char modeDescription[3][17] = {"PWM", "CC Dummy Load", "Current Readout"};
 const int powersOfTen[5] = {1, 10, 100, 1000, 10000};
 const int maxCursorPos[3] = {7, 3}; //how many available positions are there to be set in each mode, 7 in ISat because 0-4 are freq whereas 5,6,7 are duty
 
@@ -73,16 +75,19 @@ void setup() {
   initDAC();
   initADC1();
 
+#if defined DEBUG
   Serial.begin(9600);
   pinMode(DBG, OUTPUT);
-  pinMode(PIN_PA5, OUTPUT); //DEBUG: use this as a temporary voltage reference;
-  digitalWriteFast(PIN_PA5, HIGH); //ordinary digitalWrite has some weird turn off timer stuff that breaks everything
-  writeDACmV(999);
+#endif
+  
 
 }
 
 void loop() {
-
+  
+#if defined DEBUG
+  Serial.println(latest_reading);
+#endif
   //take a current reading first
   char result[7];
   float adc = readADC1mV();
@@ -127,14 +132,14 @@ void loop() {
     case DL:
 
       lcd.setCursor(0, 1);
-      snprintf(lcdSecondRow, 17, "%smA  %04dmA", result, setLoad);      
+      snprintf(lcdSecondRow, 17, "%smA \x7E%04dmA", result, setLoad); //hex 7e is the right arrow in the HD44780's charset
 
       break;
 
     case AMM:
     
       lcd.setCursor(0, 1); //print current ammeter reading on second line
-      snprintf(lcdSecondRow, 17, "        %smA", result);
+      snprintf(lcdSecondRow, 17, "       %s mA", result);
       
       break;
 
@@ -242,7 +247,7 @@ void writeDAC(int value){
 
 void writeDACmV(float milivolts) {
 
-  float data = (milivolts/VREF/1000.0f) * 4095;
+  float data = (milivolts/V_REF/1000.0f) * 4095;
   int DACword = (int)data;
 
   writeDAC(DACword);
@@ -275,7 +280,13 @@ void initADC1() {
 
   init_ADC1(); //set up prescalers
 
+  VREF.CTRLB &= ~(1 << VREF_ADC1REFEN_bp);
+  VREF.CTRLC = VREF_ADC1REFSEL_2V5_gc; //configure internal reference to the closest highest voltage
+
   ADC1.MUXPOS = 0x00; //ADC1 in 0 PA4
+  ADC1.CTRLC &= ~ ADC_REFSEL0_bm; //external reference
+  ADC1.CTRLC |= ADC_REFSEL1_bm; //external reference
+  ADC1.CTRLC |= ADC_SAMPCAP_bm; //set the smaller sampling cap as per datasheet recommendations
   ADC1.CTRLB = ADC_SAMPNUM_ACC64_gc;  //take 64 samples for 3 extra bits, total 13 bits
   ADC1.CTRLA = ADC_ENABLE_bm | ADC_FREERUN_bm; //start in freerun
   ADC1.INTCTRL = 1 << ADC_RESRDY_bp  /* Result Ready Interrupt Enable: enabled */
@@ -291,7 +302,7 @@ float readADC1mV() {
   sei();
 
   //TODO: Optimise away this floating point garbage
-  float mVoltage = ((float)rdg) / 8191.0f * VREF * 1000.0f; //13-bits max oversampling and decimation
+  float mVoltage = ((float)rdg) / 8191.0f * V_REF * 1000.0f; //13-bits max oversampling and decimation
 
   return mVoltage;
 
@@ -467,6 +478,7 @@ void leftButton() {
         mode = AMM;
 
         setPWMDuty(0); //turn off PWM to reduce noise
+        MUXPWM(); //tie gate to ground to prevent any shenanigans
 
         lcd.setCursor(0, 0);
         lcd.printf("%-16s", modeDescription[mode]);
@@ -480,6 +492,7 @@ void leftButton() {
 
         setPWMFreq(setFreq); //turn on PWM
         setPWMDuty(setDuty);
+        MUXPWM();
 
         lcd.setCursor(0, 0);
         lcd.printf("%-16s", modeDescription[mode]);
@@ -490,6 +503,10 @@ void leftButton() {
 
         //go to dummy load mode
         mode = DL;
+
+        setPWMDuty(0);
+        MUXDummyLoad();
+
         lcd.setCursor(0, 0);
         lcd.printf("%-16s", modeDescription[mode]);
 
@@ -543,7 +560,7 @@ void midButton() {
 
       case DL:
 
-        writeDACmV(setLoad);
+        writeDAC(setLoad);
 
         break;
       
@@ -599,6 +616,7 @@ void rightButton() {
         mode = DL;
         
         setPWMDuty(0); //turn off PWM to reduce noise
+        MUXDummyLoad();
 
         lcd.setCursor(0, 0);
         lcd.printf("%-16s", modeDescription[mode]);
@@ -609,6 +627,10 @@ void rightButton() {
 
         //go to ammeter mode
         mode = AMM;
+
+        setPWMDuty(0);
+        MUXPWM();
+
         lcd.setCursor(0, 0);
         lcd.printf("%-16s", modeDescription[mode]);
 
@@ -621,6 +643,7 @@ void rightButton() {
 
         setPWMFreq(setFreq); //turn on PWM
         setPWMDuty(setDuty);
+        MUXPWM();
 
         lcd.setCursor(0, 0);
         lcd.printf("%-16s", modeDescription[mode]);
