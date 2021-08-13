@@ -17,6 +17,7 @@
 #define MAX_PWM_FREQ 78000 //to maintain 8-bit duty cycle control
 #define LONGPRESS 2500 //2500ms counts as a long press
 #define LONGRETRIGGER 2000 //if the button is held down an additional 2000ms, retrigger the longpress action
+#define BLINKPERIOD 500 //digit blink frequency in parameter set mode
 const char modeDescription[3][17] = {"PWM", "CC Dummy Load", "Current Readout"};
 
 
@@ -38,6 +39,9 @@ typedef enum {ISat, DL, AMM, final} Mode; //saturation current, dummy load, and 
 Mode mode = DL; //default to dummy load mode
 
 //user changeable parameters
+bool paramSet = false; //are we currently setting parameters?
+int currentCursorPos = 0; //which thing are we setting?
+const int maxCursorPos[3] = {7, 3}; //how many available positions are there to be set in each mode, 7 in ISat because 0-4 are freq whereas 5,6,7 are duty
 int setLoad = 0; //DAC output word for dummy load, note that the dac resolution is 1mA per LSB
 long setFreq = 1000; //target frequency out
 int setDuty = 127; //target duty cycle (8 bit)
@@ -107,21 +111,21 @@ void loop() {
     case ISat:
 
       lcd.setCursor(0, 1);
-      lcd.printf("f=%5dHz  d=%3d", setFreq, setDuty);
+      lcd.printf("f=%05dHz  d=%03d", setFreq, setDuty);
 
       break;
 
     case DL:
 
       lcd.setCursor(0, 1);
-      lcd.printf("%smA  %4dmA", result, setLoad);      
+      lcd.printf("%smA  %04dmA", result, setLoad);      
 
       break;
 
     case AMM:
     
       lcd.setCursor(0, 1); //print current ammeter reading on second line
-      lcd.printf("%s        mA", result);
+      lcd.printf("        %smA", result);
       
       break;
 
@@ -130,17 +134,40 @@ void loop() {
       break;
 
   }
-  
-  // lcd.setCursor(0, 0);
-  // char result[7];
-  // float adc = readADC1mV();
-  // float mAmps = adc * 2.0f;
-  // dtostrf(mAmps, 6, 1, result);
-  // lcd.print(result);
-  // lcd.print(" mA");
-  
 
-  // delay(100);
+  if( (paramSet == true) && ((millis() / BLINKPERIOD) % 2) ) { //blink digit that is being set
+
+    switch(mode) { //mode state machine
+
+    case ISat:
+
+      lcd.setCursor((currentCursorPos <= 4 ? (6 - currentCursorPos) : (15 - currentCursorPos)), 1);
+      lcd.print(" ");
+
+      break;
+
+    case DL:
+
+      lcd.setCursor(13 - currentCursorPos, 1);
+      lcd.print(" "); 
+
+      break;
+
+    case AMM:
+    
+      
+      break;
+
+    default:
+
+      break;
+
+  }
+
+
+  }
+  
+  
 
 }
 
@@ -420,6 +447,41 @@ void midButton() {
 
     lastLongPress[2] = millis();
     //do long-press action here
+    lcd.setCursor(0, 0);
+
+    //long pressing middle button enters and exits parameter set mode
+    if(paramSet == false) { //we are just about to set some parameters
+
+      paramSet = true;
+      currentCursorPos = 0; //initialise cursor position
+      
+      switch(mode) {
+
+        case ISat:
+
+          break;
+
+        case DL:
+
+          break;
+
+        case AMM:
+
+          break;
+
+        default:
+          break;
+
+      }
+
+    }
+
+    else {
+
+      paramSet = false;
+      
+
+    }
     
   }
 
